@@ -9,6 +9,7 @@ struct Candidate {
     text: String,
     ctc_log_prob: f32,
     lm_log_prob: f32,
+    hotword_score: f32,
     total_score: f32,
 }
 
@@ -23,6 +24,10 @@ impl PrefixScore {
         log_add(self.blank, self.non_blank)
     }
 }
+
+// Hotwords provided by the user. The weight is added once for each exact
+// phrase occurrence in a decoded candidate.
+const HOTWORDS: &[(&str, f32)] = &[("looking on", 3.0), ("looking", 2.0), ("little", 2.0)];
 
 fn main() -> Result<(), kenlm::KenlmError> {
     let model = Model::new("lm/test.arpa")?;
@@ -42,12 +47,17 @@ fn main() -> Result<(), kenlm::KenlmError> {
         8,  // return this many final CTC candidates
         &model, 0.45, // LM weight; tune on validation data
         0.2,  // word insertion bonus; tune on validation data
+        HOTWORDS,
     )?;
 
     for candidate in &candidates {
         println!(
-            "{:.3}\tctc={:.3}\tlm={:.3}\t{}",
-            candidate.total_score, candidate.ctc_log_prob, candidate.lm_log_prob, candidate.text
+            "{:.3}\tctc={:.3}\tlm={:.3}\thotword={:.3}\t{}",
+            candidate.total_score,
+            candidate.ctc_log_prob,
+            candidate.lm_log_prob,
+            candidate.hotword_score,
+            candidate.text
         );
     }
 
@@ -67,6 +77,7 @@ fn ctc_prefix_beam_search(
     lm: &Model,
     lm_weight: f32,
     word_bonus: f32,
+    hotwords: &[(&str, f32)],
 ) -> Result<Vec<Candidate>, kenlm::KenlmError> {
     let mut beam: HashMap<Vec<usize>, PrefixScore> = HashMap::new();
     beam.insert(
@@ -155,12 +166,15 @@ fn ctc_prefix_beam_search(
         // log probabilities from log_softmax.
         let lm_log_prob = lm.score(&text, true, true)? * std::f32::consts::LN_10;
         let words = text.split_whitespace().count() as f32;
-        let total_score = ctc_log_prob + lm_weight * lm_log_prob + word_bonus * words;
+        let hotword_score = score_hotwords(&text, hotwords);
+        let total_score =
+            ctc_log_prob + lm_weight * lm_log_prob + word_bonus * words + hotword_score;
 
         reranked.push(Candidate {
             text,
             ctc_log_prob,
             lm_log_prob,
+            hotword_score,
             total_score,
         });
     }
@@ -176,6 +190,26 @@ fn tokens_to_text(tokens: &[usize], vocab: &[&str]) -> String {
 
 fn normalize_spaces(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn score_hotwords(text: &str, hotwords: &[(&str, f32)]) -> f32 {
+    let words = text.split_whitespace().collect::<Vec<_>>();
+
+    hotwords
+        .iter()
+        .map(|(hotword, weight)| {
+            let hotword_words = hotword.split_whitespace().collect::<Vec<_>>();
+            if hotword_words.is_empty() || hotword_words.len() > words.len() {
+                0.0
+            } else {
+                let occurrences = words
+                    .windows(hotword_words.len())
+                    .filter(|window| *window == hotword_words.as_slice())
+                    .count();
+                occurrences as f32 * weight
+            }
+        })
+        .sum()
 }
 
 fn log_add(a: f32, b: f32) -> f32 {
@@ -195,7 +229,9 @@ fn cmp_f32_desc(a: f32, b: f32) -> Ordering {
 }
 
 fn toy_log_probs(vocab_size: usize) -> Vec<Vec<f32>> {
-    let ids = [1, 2, 2, 3, 4, 5, 6, 7, 2, 5, 7, 8, 7, 1, 4, 9, 9, 1, 10];
+    let ids = [
+        1, 2, 0, 2, 3, 4, 5, 6, 7, 2, 5, 7, 8, 7, 1, 4, 9, 0, 9, 1, 10,
+    ];
     ids.iter()
         .map(|&best_id| {
             let mut frame = vec![(0.01_f32).ln(); vocab_size];
