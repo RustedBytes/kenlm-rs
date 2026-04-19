@@ -1,0 +1,108 @@
+[package]
+name = "kenlm-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+links = "kenlm"
+license = "LGPL-3.0-or-later"
+description = "Rust bindings for KenLM language model inference"
+readme = "README.md"
+homepage = "https://github.com/RustedBytes/kenlm-rs"
+repository = "https://github.com/RustedBytes/kenlm-rs"
+documentation = "https://docs.rs/kenlm-rs"
+keywords = ["kenlm", "ngram", "nlp", "language-model", "ffi"]
+categories = ["api-bindings", "science", "text-processing"]
+include = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "build.rs",
+    "src/**",
+    "examples/**",
+    "rust/**",
+    "prebuilt/**",
+    "lm/**",
+    "util/**",
+    "README.md",
+    "LICENSE",
+    "COPYING*",
+]
+
+[features]
+default = []
+full = ["tools", "estimation", "filter", "interpolate", "zlib", "bzip2", "xz"]
+bundled = []
+tools = []
+estimation = ["tools"]
+filter = ["tools"]
+interpolate = ["tools", "estimation"]
+compression = ["zlib", "bzip2", "xz"]
+zlib = []
+bzip2 = []
+xz = []
+
+[lib]
+name = "kenlm"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kenlm-build-binary"
+path = "src/bin/kenlm-build-binary.rs"
+required-features = ["tools"]
+
+[[bin]]
+name = "kenlm-query"
+path = "src/bin/kenlm-query.rs"
+required-features = ["tools"]
+
+[[bin]]
+name = "kenlm-fragment"
+path = "src/bin/kenlm-fragment.rs"
+required-features = ["tools"]
+
+[[bin]]
+name = "kenlm-cat-compressed"
+path = "src/bin/kenlm-cat-compressed.rs"
+required-features = ["tools"]
+
+[[bin]]
+name = "kenlm-lmplz"
+path = "src/bin/kenlm-lmplz.rs"
+required-features = ["estimation"]
+
+[[bin]]
+name = "kenlm-count-ngrams"
+path = "src/bin/kenlm-count-ngrams.rs"
+required-features = ["estimation"]
+
+[[bin]]
+name = "kenlm-dump-counts"
+path = "src/bin/kenlm-dump-counts.rs"
+required-features = ["estimation"]
+
+[[bin]]
+name = "kenlm-filter"
+path = "src/bin/kenlm-filter.rs"
+required-features = ["filter"]
+
+[[bin]]
+name = "kenlm-phrase-table-vocab"
+path = "src/bin/kenlm-phrase-table-vocab.rs"
+required-features = ["filter"]
+
+[[bin]]
+name = "kenlm-interpolate"
+path = "src/bin/kenlm-interpolate.rs"
+required-features = ["interpolate"]
+
+[[bin]]
+name = "kenlm-streaming-example"
+path = "src/bin/kenlm-streaming-example.rs"
+required-features = ["interpolate"]
+
+[build-dependencies]
+cc = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
