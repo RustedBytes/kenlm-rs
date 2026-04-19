@@ -38,13 +38,9 @@ fn main() -> Result<(), kenlm::KenlmError> {
     let log_probs = toy_log_probs(vocab.len());
 
     let candidates = ctc_prefix_beam_search(
-        &log_probs,
-        &vocab,
-        blank_id,
-        32,   // keep this many partial prefixes per frame
-        8,    // return this many final CTC candidates
-        &model,
-        0.45, // LM weight; tune on validation data
+        &log_probs, &vocab, blank_id, 32, // keep this many partial prefixes per frame
+        8,  // return this many final CTC candidates
+        &model, 0.45, // LM weight; tune on validation data
         0.2,  // word insertion bonus; tune on validation data
     )?;
 
