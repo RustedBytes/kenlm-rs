@@ -48,6 +48,7 @@ jobs:
       CIBW_BUILD: ${{ github.event_name == 'pull_request' && 'cp39-* cp314-*' || '*' }}
       CIBW_PROJECT_REQUIRES_PYTHON: '>=3.9, <3.15'
       CIBW_SKIP: 'pp* *musllinux*'
+      CIBW_BEFORE_BUILD_MACOS: 'rm -rf {project}/build'
 
     steps:
       - uses: actions/checkout@v5
@@ -110,6 +111,32 @@ jobs:
       - name: Audit macOS wheel tags and Mach-O dependencies
         if: runner.os == 'macOS'
         run: python .github/scripts/check-macos-wheels.py wheelhouse --arch '${{ matrix.arch }}' --target 14.0
+
+      - name: Rebuild CPython 3.9 wheel to check reproducibility
+        if: matrix.os == 'macOS-15' || matrix.os == 'macOS-15-large'
+        uses: pypa/cibuildwheel@v3.1.4
+        with:
+          output-dir: wheelhouse-repeat
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '14.0'
+          CIBW_ARCHS_MACOS: ${{ matrix.arch }}
+          CIBW_BUILD: 'cp39-*'
+
+      - name: Compare clean rebuilds byte for byte
+        if: matrix.os == 'macOS-15' || matrix.os == 'macOS-15-large'
+        run: |
+          python - <<'PYTHON'
+          import hashlib
+          from pathlib import Path
+          repeated = list(Path('wheelhouse-repeat').glob('*.whl'))
+          assert len(repeated) == 1, repeated
+          for wheel in repeated:
+              original = Path('wheelhouse') / wheel.name
+              first = hashlib.sha256(original.read_bytes()).hexdigest()
+              second = hashlib.sha256(wheel.read_bytes()).hexdigest()
+              print(f'{wheel.name}: first={first}, rebuild={second}')
+              assert first == second, f'Non-reproducible wheel: {wheel.name}'
+          PYTHON
 
       - uses: actions/upload-artifact@v4
         with:

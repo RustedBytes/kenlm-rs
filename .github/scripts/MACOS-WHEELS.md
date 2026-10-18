@@ -29,13 +29,15 @@ CI performs the following checks:
   Homebrew paths, unresolved rpaths and binaries requiring an OS newer than 14.
 - Each installed wheel imports and scores plain/gzip/bzip2/xz ARPA fixtures
   outside the checkout and loads the standalone dylib via ctypes.
+- macOS 15 jobs rebuild CPython 3.9 from a clean build directory and compare
+  SHA-256 hashes of the complete wheels, for both architectures.
 - Negative regression fixtures ensure the audit rejects misleading old tags,
   newer binaries, wrong architectures and external/missing dependencies.
 
 These checks establish binary deployment metadata and execution on macOS 15/26.
 They do not replace a runtime test on a physical/self-hosted macOS 14 machine,
-or prove absence of unguarded newer system symbols. Nor do they establish
-bit-for-bit reproducibility across hosted image updates: runner images and
+or prove absence of unguarded newer system symbols. The clean rebuild comparison verifies byte-for-byte reproducibility within
+one job. It does not establish reproducibility across hosted image updates: runner images and
 Apple SDK contents remain external inputs. Pins and version logs make builds
 repeatable and changes diagnosable; retain artifacts from both SDK hosts for
 comparison. No publishing is enabled in this workflow.
