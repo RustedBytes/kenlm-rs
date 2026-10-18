@@ -6,14 +6,27 @@ import subprocess
 import os
 import sys
 import re
+import shlex
+import tempfile
 from pathlib import Path
 from Cython.Build import cythonize
 
 #Does gcc compile with this header and library?
 def compile_test(header, library):
-    dummy_path = os.path.join(os.path.dirname(__file__), "dummy")
-    command = "bash -c \"g++ -include " + header + " -l" + library + " -x c++ - <<<'#include <" + header + ">\nint main() {}' -o " + dummy_path + " >/dev/null 2>/dev/null && rm " + dummy_path + " 2>/dev/null\""
-    return os.system(command) == 0
+    # Use the same compiler and dependency flags as the extension build.
+    with tempfile.TemporaryDirectory() as directory:
+        command = shlex.split(os.environ.get("CXX", "g++"))
+        for variable in ("CPPFLAGS", "CXXFLAGS"):
+            command += shlex.split(os.environ.get(variable, ""))
+        command += ["-x", "c++", "-", "-o", os.path.join(directory, "probe")]
+        command += shlex.split(os.environ.get("LDFLAGS", "")) + ["-l" + library]
+        try:
+            return subprocess.run(
+                command, input=f"#include <{header}>\nint main() {{}}\n",
+                text=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            ).returncode == 0
+        except OSError:
+            return False
 
 # Use an environment variable
 max_order = os.getenv("MAX_ORDER", "6")
@@ -43,7 +56,10 @@ else:
 
 #Attempted fix to https://github.com/kpu/kenlm/issues/186 and https://github.com/kpu/kenlm/issues/197
 if platform.system() == 'Darwin':
-    ARGS += ["-stdlib=libc++", "-mmacosx-version-min=10.7"]
+    ARGS += ["-stdlib=libc++"]
+    # Keep the historical default, but honor cibuildwheel's deployment target.
+    deployment_target = os.environ.get("MACOSX_DEPLOYMENT_TARGET", "10.7")
+    ARGS.append("-mmacosx-version-min=" + deployment_target)
     INCLUDE_PATHS.append("/usr/local/include")
 
 if compile_test('zlib.h', 'z'):
@@ -78,6 +94,9 @@ class build_ext(_build_ext):
             "-DBUILD_PYTHON_STANDALONE=ON",
             f"-DKENLM_MAX_ORDER={max_order}",
         ]
+        if platform.system() == "Darwin":
+            cmake_args += ["-DCMAKE_OSX_DEPLOYMENT_TARGET=" + deployment_target]
+        cmake_args += shlex.split(os.environ.get("CMAKE_ARGS", ""))
         cfg = "Debug" if self.debug else "Release"
         build_args = ["--config", cfg]
 

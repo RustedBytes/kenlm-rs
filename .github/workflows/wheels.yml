@@ -1,141 +1,134 @@
 name: Build distribution
 
-on: [workflow_dispatch]
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/wheels.yml'
+      - '.github/scripts/**'
+      - '.github/constraints/**'
+      - 'setup.py'
+      - 'pyproject.toml'
+      - 'MANIFEST.in'
+      - 'CMakeLists.txt'
+      - 'python/**'
+      - 'lm/**'
+      - 'util/**'
+
+permissions:
+  contents: read
 
 jobs:
+  validate_wheel_audit:
+    name: Test wheel compatibility checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python .github/scripts/test-wheel-audit.py
+
   build_wheels:
-    name: Build wheels on ${{ matrix.os }}
+    name: Build wheels on ${{ matrix.os }} (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [
-          ubuntu-24.04,
-          ubuntu-24.04-arm,
-          macOS-14,         # macOS-14 arm64
-          macOS-14-large,   # macOS-14 x86_64
-          macOS-15,         # macOS-15 arm64
-          macOS-15-large,   # macOS-15 x86_64
-          macOS-26,         # macOS-26 arm64
-          macOS-26-large,   # macOS-26 x86_64
-        ]
+        include:
+          - {os: ubuntu-24.04, arch: x86_64}
+          - {os: ubuntu-24.04-arm, arch: aarch64}
+          - {os: macOS-15, arch: arm64}
+          - {os: macOS-15-large, arch: x86_64}
+          - {os: macOS-26, arch: arm64}
+          - {os: macOS-26-large, arch: x86_64}
+    env:
+      # Test the oldest/newest supported Python on PRs; manual builds cover all.
+      CIBW_BUILD: ${{ github.event_name == 'pull_request' && 'cp39-* cp314-*' || '*' }}
+      CIBW_PROJECT_REQUIRES_PYTHON: '>=3.9, <3.15'
+      CIBW_SKIP: 'pp* *musllinux*'
 
     steps:
       - uses: actions/checkout@v5
 
       - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
 
       - uses: maxim-lobanov/setup-xcode@v1
-        if:
-          matrix.os == 'macOS-14' ||
-          matrix.os == 'macOS-14-large' ||
-          matrix.os == 'macOS-15' ||
-          matrix.os == 'macOS-15-large' ||
-          matrix.os == 'macOS-26' ||
-          matrix.os == 'macOS-26-large'
+        if: runner.os == 'macOS'
         with:
-          xcode-version: latest-stable
+          xcode-version: '26.3'
 
-      - name: Build package Ubuntu all
+      - name: Check out XZ 5.8.1 sources
+        if: runner.os == 'macOS'
+        uses: actions/checkout@v5
+        with:
+          repository: tukaani-project/xz
+          ref: a522a226545730551f7e7c2685fab27cf567746c
+          path: .ci-xz
+          persist-credentials: false
+
+      - name: Prepare macOS dependencies
+        if: runner.os == 'macOS'
+        env:
+          MACOSX_DEPLOYMENT_TARGET: '14.0'
+        run: |
+          python -m pip install -r .github/constraints/macos-build.txt
+          bash .github/scripts/prepare-macos.sh
+          sw_vers
+          xcodebuild -version
+          xcrun --show-sdk-version
+          clang --version
+          python -m pip freeze
+
+      - name: Build package Ubuntu
         uses: pypa/cibuildwheel@v3.1.4
-        if: matrix.os == 'ubuntu-24.04' || matrix.os == 'ubuntu-24.04-arm'
+        if: runner.os == 'Linux'
         with:
           output-dir: wheelhouse
         env:
-          CIBW_BEFORE_ALL_LINUX: "
+          CIBW_BEFORE_ALL_LINUX: >-
             { yum makecache && yum install -y boost-devel; } ||
-            { apt-get update && apt-get install libboost-all-dev; }
-            "
-          CIBW_ARCHS_LINUX: "native"
-          CIBW_PROJECT_REQUIRES_PYTHON: ">=3.9, <3.15"
-          CIBW_SKIP: "pp* *musllinux*"
+            { apt-get update && apt-get install -y libboost-all-dev; }
+          CIBW_ARCHS_LINUX: ${{ matrix.arch }}
 
-      - name: Build package macOS 14
+      - name: Build wheels for macOS 14 and later
         uses: pypa/cibuildwheel@v3.1.4
-        if: matrix.os == 'macOS-14' || matrix.os == 'macOS-14-large'
+        if: runner.os == 'macOS'
         with:
           output-dir: wheelhouse
         env:
-          MACOSX_DEPLOYMENT_TARGET: 14.0
-          CIBW_BEFORE_ALL_MACOS:
-            brew update &&
-            brew upgrade cmake &&
-            brew install boost &&
-            pip install --upgrade pip
-          CIBW_ARCHS_MACOS: "native"
-          CIBW_PROJECT_REQUIRES_PYTHON: ">=3.9, <3.15"
+          MACOSX_DEPLOYMENT_TARGET: '14.0'
+          CIBW_ARCHS_MACOS: ${{ matrix.arch }}
+          CIBW_BUILD_VERBOSITY: '1'
+          # Default delocate repair checks dependency targets; never retag a
+          # newer binary as macOS 14. Audit the repaired wheel independently.
+          CIBW_TEST_COMMAND: 'python {project}/.github/scripts/test-wheel.py {project}/lm/test.arpa'
 
-      - name: Build package macOS 15
-        uses: pypa/cibuildwheel@v3.1.4
-        if: matrix.os == 'macOS-15' || matrix.os == 'macOS-15-large'
-        with:
-          output-dir: wheelhouse
-        env:
-          MACOSX_DEPLOYMENT_TARGET: 15.0
-          CIBW_BEFORE_ALL_MACOS:
-            brew update &&
-            brew upgrade cmake &&
-            brew install boost &&
-            pip install --upgrade pip
-          CIBW_ARCHS_MACOS: "native"
-          CIBW_PROJECT_REQUIRES_PYTHON: ">=3.9, <3.15"
-
-      - name: Build package macOS 26
-        uses: pypa/cibuildwheel@v3.1.4
-        if: matrix.os == 'macOS-26' || matrix.os == 'macOS-26-large'
-        with:
-          output-dir: wheelhouse
-        env:
-          MACOSX_DEPLOYMENT_TARGET: 26.0
-          CIBW_BEFORE_ALL_MACOS:
-            brew update &&
-            brew upgrade cmake &&
-            brew install boost &&
-            pip install --upgrade pip
-          CIBW_ARCHS_MACOS: "native"
-          CIBW_PROJECT_REQUIRES_PYTHON: ">=3.9, <3.15"
+      - name: Audit macOS wheel tags and Mach-O dependencies
+        if: runner.os == 'macOS'
+        run: python .github/scripts/check-macos-wheels.py wheelhouse --arch '${{ matrix.arch }}' --target 14.0
 
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}
           path: ./wheelhouse/*.whl
-          overwrite: true
+          if-no-files-found: error
 
   build_sdist:
     name: Build source distribution
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
       - uses: actions/setup-python@v6
-
+        with:
+          python-version: '3.12'
       - name: Build sdist
-        env:
-          CIBW_PROJECT_REQUIRES_PYTHON: "3.9"
-
-        run: pip install --upgrade pip && pip install build && python -m build --sdist --outdir dist && touch dist/empty.txt
-
+        run: python -m pip install build && python -m build --sdist --outdir dist
       - uses: actions/upload-artifact@v4
         with:
           name: source-dist
-          path: |
-            dist/*.tar.gz
-            empty.txt
-          overwrite: true
-
-  # upload_pypi:
-  #   needs: [build_wheels, build_sdist]
-  #   runs-on: ubuntu-latest
-  #   if: github.event_name == 'push'
-  #   # if: github.event_name == 'release' && github.event.action == 'published'
-  #   steps:
-  #     - uses: actions/download-artifact@v3
-  #       with:
-  #         name: artifact
-  #         path: dist
-
-  #     - uses: pypa/gh-action-pypi-publish@v1.5.0
-  #       with:
-  #         user: __token__
-  #         password: ${{ secrets.pypi_test_password }}
-  #         repository_url: https://test.pypi.org/legacy/
-  #         verify_metadata: false
+          path: dist/*.tar.gz
+          if-no-files-found: error

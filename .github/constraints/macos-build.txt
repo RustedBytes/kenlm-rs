@@ -1,0 +1,5 @@
+# Build dependencies for CPython 3.9-3.14, used alongside cibuildwheel's pins.
+Cython==3.1.4
+setuptools==80.9.0
+wheel==0.45.1
+cmake==3.31.6
