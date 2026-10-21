@@ -68,9 +68,10 @@ extern "C" {
     fn kenlm_model_order(model: *const RawModel) -> u8;
     fn kenlm_model_begin_sentence_write(model: *const RawModel, state: *mut c_void);
     fn kenlm_model_null_context_write(model: *const RawModel, state: *mut c_void);
-    fn kenlm_model_try_index(
+    fn kenlm_model_try_index_len(
         model: *const RawModel,
         word: *const c_char,
+        length: usize,
         out: *mut c_uint,
     ) -> c_int;
     fn kenlm_model_begin_sentence_index(model: *const RawModel) -> c_uint;
@@ -95,7 +96,7 @@ extern "C" {
 /// Errors returned by the KenLM bindings.
 #[derive(Debug)]
 pub enum KenlmError {
-    /// A path or word contained an interior NUL byte and cannot cross the C ABI.
+    /// A path contained an interior NUL byte and cannot cross the C ABI.
     InteriorNul(NulError),
     /// KenLM could not load the requested model.
     Load(String),
@@ -253,12 +254,22 @@ impl Model {
     }
 
     /// Return KenLM's vocabulary index for `word`, or the not-found index for OOV words.
+    ///
+    /// The lookup doesn't allocate: KenLM takes the word as a pointer and
+    /// length, so it needs no NUL terminator. A word containing a NUL byte is
+    /// simply out of vocabulary.
     pub fn index(&self, word: &str) -> Result<WordIndex> {
-        let word = CString::new(word)?;
-        // SAFETY: `self.raw` is live and `word` is a valid NUL-terminated C
-        // string for the duration of the call.
         let mut index = 0;
-        let status = unsafe { kenlm_model_try_index(self.raw.as_ptr(), word.as_ptr(), &mut index) };
+        // SAFETY: `self.raw` is live, and `word` is valid for `word.len()`
+        // bytes for the duration of the call. KenLM reads exactly that range.
+        let status = unsafe {
+            kenlm_model_try_index_len(
+                self.raw.as_ptr(),
+                word.as_ptr().cast(),
+                word.len(),
+                &mut index,
+            )
+        };
         if status == 0 {
             Ok(index as WordIndex)
         } else {
@@ -576,6 +587,23 @@ mod tests {
             .unwrap();
         assert_eq!(full_scores.len(), 5);
         assert!(full_scores.iter().all(|score| score.log_prob.is_finite()));
+    }
+
+    #[test]
+    fn index_reads_only_the_given_bytes() {
+        let config = Config {
+            show_progress: false,
+            ..Config::default()
+        };
+        let model = Model::with_config("lm/test.arpa", config).unwrap();
+
+        let looking = model.index("looking").unwrap();
+        assert_ne!(looking, model.not_found_index());
+        // A slice of a longer string isn't NUL-terminated where it ends.
+        assert_eq!(model.index(&"looking on"[..7]).unwrap(), looking);
+        assert_eq!(model.index("").unwrap(), model.not_found_index());
+        // Words with a NUL byte are out of vocabulary rather than an error.
+        assert_eq!(model.index("look\0ing").unwrap(), model.not_found_index());
     }
 
     #[test]

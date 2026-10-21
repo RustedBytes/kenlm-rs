@@ -41,6 +41,11 @@ void kenlm_model_null_context_write(const KenlmModel *model, void *state);
 
 uint32_t kenlm_model_index(const KenlmModel *model, const char *word);
 int kenlm_model_try_index(const KenlmModel *model, const char *word, uint32_t *out);
+int kenlm_model_try_index_len(
+    const KenlmModel *model,
+    const char *word,
+    size_t length,
+    uint32_t *out);
 uint32_t kenlm_model_begin_sentence_index(const KenlmModel *model);
 uint32_t kenlm_model_end_sentence_index(const KenlmModel *model);
 uint32_t kenlm_model_not_found_index(const KenlmModel *model);

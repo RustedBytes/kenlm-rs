@@ -123,6 +123,21 @@ int kenlm_model_try_index(const KenlmModel *model, const char *word, uint32_t *o
   }
 }
 
+int kenlm_model_try_index_len(
+    const KenlmModel *model,
+    const char *word,
+    size_t length,
+    uint32_t *out) {
+  ClearLastError();
+  try {
+    *out = model->model->BaseVocabulary().Index(StringPiece(word, length));
+    return 0;
+  } catch (...) {
+    StoreException("failed to look up KenLM vocabulary entry");
+    return 1;
+  }
+}
+
 uint32_t kenlm_model_begin_sentence_index(const KenlmModel *model) {
   return model->model->BaseVocabulary().BeginSentence();
 }
