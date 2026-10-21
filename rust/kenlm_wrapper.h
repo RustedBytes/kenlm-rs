@@ -27,6 +27,7 @@ typedef struct KenlmFullScore {
 } KenlmFullScore;
 
 void kenlm_config_default(KenlmConfig *config);
+int kenlm_build_binary(const char *input, const char *output);
 
 KenlmModel *kenlm_model_load(const char *path, const KenlmConfig *config);
 void kenlm_model_free(KenlmModel *model);

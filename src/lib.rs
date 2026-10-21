@@ -34,6 +34,21 @@ pub type Result<T> = std::result::Result<T, KenlmError>;
 /// KenLM vocabulary index.
 pub type WordIndex = u32;
 
+/// Convert an ARPA file to an unquantized probing binary. Output must differ
+/// from input; callers should use a temporary output and publish on success.
+pub fn build_binary(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<()> {
+    let input = CString::new(input.as_ref().as_os_str().to_string_lossy().as_bytes())?;
+    let output = CString::new(output.as_ref().as_os_str().to_string_lossy().as_bytes())?;
+    // SAFETY: Both strings remain valid throughout the call. The C++ wrapper
+    // catches exceptions and reports errors through thread-local storage.
+    let status = unsafe { kenlm_build_binary(input.as_ptr(), output.as_ptr()) };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(last_error())
+    }
+}
+
 #[repr(C)]
 struct RawModel {
     _private: [u8; 0],
@@ -60,6 +75,7 @@ struct RawFullScore {
 }
 
 extern "C" {
+    fn kenlm_build_binary(input: *const c_char, output: *const c_char) -> c_int;
     fn kenlm_config_default(config: *mut RawConfig);
     fn kenlm_model_load(path: *const c_char, config: *const RawConfig) -> *mut RawModel;
     fn kenlm_model_free(model: *mut RawModel);
@@ -556,6 +572,39 @@ fn last_error() -> KenlmError {
 mod tests {
     use super::*;
 
+    #[test]
+    fn binary_conversion_preserves_scores_and_returns_errors() {
+        let binary = std::env::temp_dir().join(format!(
+            "kenlm-binary-{}-{}.bin",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        build_binary("lm/test.arpa", &binary).unwrap();
+        {
+            let config = Config {
+                show_progress: false,
+                ..Config::default()
+            };
+            let arpa = Model::with_config("lm/test.arpa", config).unwrap();
+            let cached = Model::with_config(&binary, config).unwrap();
+            assert_eq!(arpa.order(), cached.order());
+            for text in ["looking on a little", "unknown vocabulary"] {
+                for eos in [false, true] {
+                    assert!(
+                        (arpa.score(text, true, eos).unwrap()
+                            - cached.score(text, true, eos).unwrap())
+                        .abs()
+                            < 1e-6
+                    );
+                }
+            }
+        }
+        std::fs::remove_file(&binary).unwrap();
+        assert!(build_binary(binary.with_extension("missing"), &binary).is_err());
+    }
     #[test]
     fn loads_and_scores_test_model() {
         let config = Config {

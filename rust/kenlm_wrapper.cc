@@ -60,6 +60,21 @@ KenlmFullScore ToCFullScore(const lm::FullScoreReturn &input) {
 
 extern "C" {
 
+int kenlm_build_binary(const char *input, const char *output) {
+  ClearLastError();
+  try {
+    lm::ngram::Config config;
+    config.write_mmap = output;
+    config.write_method = lm::ngram::Config::WRITE_AFTER;
+    config.arpa_complain = lm::ngram::Config::NONE;
+    lm::ngram::ProbingModel model(input, config);
+    return 0;
+  } catch (...) {
+    StoreException("failed to build KenLM binary");
+    return 1;
+  }
+}
+
 void kenlm_config_default(KenlmConfig *config) {
   if (!config) return;
   lm::ngram::Config defaults;

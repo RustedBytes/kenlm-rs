@@ -60,9 +60,14 @@ fn main() {
     }
 
     let mut build = cc::Build::new();
+    build.cpp(true);
+    if build.get_compiler().is_like_msvc() {
+        // MSVC has no C++11 mode; C++14 is its earliest selectable standard.
+        build.std("c++14").flag("/EHsc");
+    } else {
+        build.std("c++11");
+    }
     build
-        .cpp(true)
-        .std("c++11")
         .include(".")
         .define("KENLM_MAX_ORDER", max_order.as_str())
         .flag_if_supported("-Wno-class-memaccess")
