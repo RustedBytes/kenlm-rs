@@ -19,6 +19,9 @@ fn main() {
     println!("cargo:rerun-if-env-changed=KENLM_RS_USE_BUNDLED");
 
     let max_order = env::var("KENLM_MAX_ORDER").unwrap_or_else(|_| "6".to_string());
+    // `State` sizes its inline buffer from this. Prebuilt libraries are
+    // checked against it when a model loads.
+    println!("cargo:rustc-env=KENLM_RS_MAX_ORDER={max_order}");
     let tools = feature("TOOLS");
     let estimation = feature("ESTIMATION");
     let filter = feature("FILTER");
